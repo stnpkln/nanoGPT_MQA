@@ -1,0 +1,34 @@
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanogpt_mqa"
+version = "0.1.0"
+description = "A fork of nanoGPT for training and experimenting with GPT models using multi-query attention"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "numpy",
+    "transformers",
+    "tiktoken",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+data = [
+    "datasets",
+]
+logging = [
+    "wandb",
+]
+all = [
+    "datasets",
+    "wandb",
+]
+
+[tool.setuptools]
+py-modules = []
+packages = []
