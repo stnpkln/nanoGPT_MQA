@@ -1,0 +1,24 @@
+WikiBook dataset configuration
+==============================
+
+WikiText-2 percentage: 100%
+BookCorpus percentage: 100%
+Random seed: 31
+Shuffle: True
+Token dtype: uint16
+Splits: train, val
+
+TRAIN SPLIT
+  WikiText-2 available: 2,403,644
+  BookCorpus available: 1,043,893,466
+  WikiText-2 used: 2,403,644
+  BookCorpus used: 1,043,893,466
+  Total tokens: 1,046,297,110
+
+VAL SPLIT
+  WikiText-2 available: 248,461
+  BookCorpus available: 57,427,106
+  WikiText-2 used: 248,461
+  BookCorpus used: 57,427,106
+  Total tokens: 57,675,567
+
