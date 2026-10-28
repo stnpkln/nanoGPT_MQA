@@ -55,7 +55,6 @@ def create_wikibook(
             wikitext_tokens=wiki_tokens,
             bookcorpus_tokens=book_tokens,
             seed=seed,
-            shuffle=True,
         )
 
         output_file = WIKIBOOK_DIR / f"{split}.bin"

@@ -10,7 +10,6 @@ def load_wikibook(
     wikitext_tokens: int = 1_000_000,
     bookcorpus_tokens: int = 1_000_000,
     seed: int = 31,
-    shuffle: bool = True,
 ) -> np.ndarray:
     """
     Load a mixed WikiText-2 + BookCorpus token dataset.
@@ -56,8 +55,5 @@ def load_wikibook(
     books = load_tokens(BOOKCORPUS_DIR / f"{split}.bin", bookcorpus_tokens)
 
     mixed = np.concatenate((wiki, books))
-
-    if shuffle:
-        rng.shuffle(mixed)
 
     return mixed

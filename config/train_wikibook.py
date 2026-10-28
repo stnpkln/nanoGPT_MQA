@@ -28,7 +28,7 @@ dropout = 0.1
 bias = False
 
 # Optimizer
-learning_rate = 1e-4
+learning_rate = 3e-4
 max_iters = 20000
 weight_decay = 1e-1
 beta1 = 0.9
