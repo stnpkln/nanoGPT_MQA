@@ -32,7 +32,7 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        self.c_attn = nn.Linear(config.n_embd, (1 if config.mqa else 3) * config.n_embd, bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
@@ -41,6 +41,7 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.mqa = config.mqa
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -49,14 +50,29 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x):
+    def forward(self, x, kv_matrix=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        q, k, v = None, None, None
+        head_dim = C // self.n_head
+        if self.mqa:
+            assert kv_matrix is not None
+            assert kv_matrix.shape == (B, T, 2 * head_dim)
+
+            q = self.c_attn(x)
+            k, v = kv_matrix.split(head_dim, dim=-1)
+
+            q = q.view(B, T, self.n_head, head_dim).transpose(1, 2)
+            k = k.view(B, T, 1, head_dim).transpose(1, 2)
+            v = v.view(B, T, 1, head_dim).transpose(1, 2)
+
+        else:
+            q, k, v = self.c_attn(x).split(C, dim=-1)
+
+            q = q.view(B, T, self.n_head, head_dim).transpose(1, 2)
+            k = k.view(B, T, self.n_head, head_dim).transpose(1, 2)
+            v = v.view(B, T, self.n_head, head_dim).transpose(1, 2)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -99,9 +115,17 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
+        if config.mqa:
+            head_dim = config.n_embd // config.n_head
+            self.kv_proj = nn.Linear(config.n_embd, 2 * head_dim, bias=config.bias)
+        else:
+            self.kv_proj = None
+        self.mqa = config.mqa
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+        x_norm = self.ln_1(x)
+        kv_matrix = self.kv_proj(x_norm) if self.mqa else None
+        x = x + self.attn(x_norm, kv_matrix)
         x = x + self.mlp(self.ln_2(x))
         return x
 
