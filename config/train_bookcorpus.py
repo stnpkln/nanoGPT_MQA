@@ -26,6 +26,7 @@ n_head = 12
 n_embd = 384
 dropout = 0.1
 bias = False
+mqa = True
 
 # Optimizer
 learning_rate = 3e-4
