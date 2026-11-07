@@ -11,4 +11,5 @@ input.txt
 env/
 venv/
 .venv/
-nanogpt_mqa.egg-info
+nanogpt_mqa.egg-info/
+.doc/
