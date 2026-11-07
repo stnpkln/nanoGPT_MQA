@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from directories import BOOKCORPUS_DIR, WIKIBOOK_DIR, WIKITEXT_DIR
+from directories import BOOKCORPUS_DIR, WIKIBOOK_DIR, WIKITEXT_DIR, WIKITEXT_PREFIX, BOOKCORPUS_PREFIX
 from load_wikibook import load_wikibook
 
 
@@ -34,8 +34,8 @@ def create_wikibook(
     results = {}
 
     for split in ("train", "val"):
-        wiki_total = get_token_count(WIKITEXT_DIR / f"{split}.bin")
-        book_total = get_token_count(BOOKCORPUS_DIR / f"{split}.bin")
+        wiki_total = get_token_count(WIKITEXT_DIR / f"{WIKITEXT_PREFIX}_{split}.bin")
+        book_total = get_token_count(BOOKCORPUS_DIR / f"{BOOKCORPUS_PREFIX}_{split}.bin")
 
         wiki_tokens = int(wiki_total * wiki_percentage / 100)
         book_tokens = int(book_total * book_percentage / 100)

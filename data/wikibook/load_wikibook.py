@@ -2,7 +2,7 @@
 from pathlib import Path
 
 import numpy as np
-from directories import BOOKCORPUS_DIR, WIKITEXT_DIR
+from directories import BOOKCORPUS_DIR, WIKITEXT_DIR, WIKITEXT_PREFIX, BOOKCORPUS_PREFIX
 
 
 def load_wikibook(
@@ -51,8 +51,8 @@ def load_wikibook(
         start = int(rng.integers(0, len(tokens) - count + 1))
         return np.array(tokens[start : start + count], copy=True)
 
-    wiki = load_tokens(WIKITEXT_DIR / f"{split}.bin", wikitext_tokens)
-    books = load_tokens(BOOKCORPUS_DIR / f"{split}.bin", bookcorpus_tokens)
+    wiki = load_tokens(WIKITEXT_DIR / f"{WIKITEXT_PREFIX}_{split}.bin", wikitext_tokens)
+    books = load_tokens(BOOKCORPUS_DIR / f"{BOOKCORPUS_PREFIX}_{split}.bin", bookcorpus_tokens)
 
     mixed = np.concatenate((wiki, books))
 
