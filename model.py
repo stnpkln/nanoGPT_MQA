@@ -186,7 +186,9 @@ class GPT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None, kv_caches=None):
-        # kv_cache is list of kv_caches for each attantion block independatly
+        if targets is not None and kv_caches is not None:
+            raise ValueError("Sorry, but KV-cache cannot be used with targets =)")
+        # kv_cache is list of pairs k_cache and v_cache for each attantion block independatly
         device = idx.device
         B, total_len = idx.shape
 
@@ -195,10 +197,10 @@ class GPT(nn.Module):
         past_len = 0
 
         if kv_caches is not None:
-            assert self.config.mqa
+            assert self.config.kv_cache
             assert len(kv_caches) == self.config.n_layer
 
-            past_len = kv_caches[0].size(1)
+            past_len = kv_caches[0][0].size(1)
             assert past_len < total_len
 
             idx = idx[:, past_len:]
@@ -214,7 +216,7 @@ class GPT(nn.Module):
         
         new_kv_cache = []
         for i, block in enumerate(self.transformer.h):
-            # block_cache: B, T, 2 * n_head_dim
+            # block_cache: B, T_cached, n_kv_head * head_dim
             block_cache = kv_caches[i] if kv_caches is not None else None
 
             x, updated_kv_cache = block(x, block_cache)
@@ -251,6 +253,7 @@ class GPT(nn.Module):
 
     @classmethod
     def from_pretrained(cls, model_type, override_args=None):
+        raise Exception("Sorry, actual version dont support pretrained model =)")
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         override_args = override_args or {} # default to empty dict
         # only dropout can be overridden see more notes below
