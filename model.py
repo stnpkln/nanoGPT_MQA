@@ -112,37 +112,13 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
-        if config.mqa:
-            head_dim = config.n_embd // config.n_head
-            self.kv_proj = nn.Linear(config.n_embd, 2 * head_dim, bias=config.bias)
-        else:
-            self.kv_proj = None
-        self.mqa = config.mqa
 
     def forward(self, x, kv_cache=None):
-        # x: B, T, n_embd
-        #   if kv_cache and then T = 1
-        #   else T = T
-        # kv_cache: B, T, 2 * n_head_dim
-        #   is K,V projections of prev tokens
         x_norm = self.ln_1(x)
-        kv_matrix = self.get_kv_matrix(x_norm, kv_cache) if self.mqa else None
-        attn_output = self.attn(
-            x_norm, 
-            kv_matrix=kv_matrix,
-            prev_len=kv_cache.size(1) if kv_cache is not None else 0
-        )
+        attn_output, new_kv_cache = self.attn(x_norm, kv_cache)
         x = x + attn_output
         x = x + self.mlp(self.ln_2(x))
-        return x, kv_matrix
-
-    def get_kv_matrix(self, x, kv_cache=None):
-        new_kv = self.kv_proj(x)
-
-        if kv_cache is None:
-            return new_kv
-
-        return torch.cat((kv_cache, new_kv), dim=1)
+        return x, new_kv_cache
 
 @dataclass
 class GPTConfig:
