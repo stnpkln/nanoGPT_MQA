@@ -8,6 +8,7 @@ eval_iters = 100
 eval_only = False
 always_save_checkpoint = False
 init_from = 'scratch'
+early_stopping_patience = 6
 
 wandb_log = False
 wandb_project = 'nanogpt-mqa'

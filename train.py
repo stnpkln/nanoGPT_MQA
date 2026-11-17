@@ -26,6 +26,7 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+import torch.distributed as dist
 
 from model import GPTConfig, GPT
 
@@ -37,6 +38,9 @@ eval_interval = 2000
 log_interval = 1
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
+early_stopping = True # stop when validation loss has not improved for several evaluations
+early_stopping_patience = 10 # consecutive evaluations without improvement
+early_stopping_min_delta = 0.0 # minimum decrease in validation loss counted as improvement
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
@@ -134,6 +138,7 @@ def get_batch(split):
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
 best_val_loss = 1e9
+bad_evals = 0 # consecutive validation evaluations without improvement
 
 # attempt to derive vocab_size from the dataset
 meta_path = os.path.join(data_dir, 'meta.pkl')
@@ -260,31 +265,68 @@ while True:
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-    # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
-        losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        if wandb_log:
-            wandb.log({
-                "iter": iter_num,
-                "train/loss": losses['train'],
-                "val/loss": losses['val'],
-                "lr": lr,
-                "mfu": running_mfu*100, # convert to percentage
-            })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses['val']
-            if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'model_args': model_args,
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+    # Evaluate train/validation loss and save checkpoints.
+    if iter_num % eval_interval == 0:
+        stop_training = False
+
+        if master_process:
+            losses = estimate_loss()
+            current_val_loss = losses['val'].item()
+            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {current_val_loss:.4f}")
+
+            if wandb_log:
+                wandb.log({
+                    "iter": iter_num,
+                    "train/loss": losses['train'],
+                    "val/loss": current_val_loss,
+                    "lr": lr,
+                    "mfu": running_mfu*100, # convert to percentage
+                })
+
+            # An improvement must beat the previous best by min_delta.
+            improved = current_val_loss < (best_val_loss - early_stopping_min_delta)
+
+            if improved:
+                best_val_loss = current_val_loss
+                bad_evals = 0
+            elif iter_num > 0:
+                bad_evals += 1
+
+            # Save the best checkpoint, or every checkpoint if requested.
+            if improved or always_save_checkpoint:
+                if iter_num > 0:
+                    checkpoint = {
+                        'model': raw_model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'model_args': model_args,
+                        'iter_num': iter_num,
+                        'best_val_loss': best_val_loss,
+                        'config': config,
+                    }
+                    print(f"saving checkpoint to {out_dir}")
+                    torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+            if early_stopping and iter_num > 0 and bad_evals >= early_stopping_patience:
+                print(
+                    f"Early stopping at iteration {iter_num}: validation loss did not "
+                    f"improve for {early_stopping_patience} consecutive evaluations. "
+                    f"Best validation loss: {best_val_loss:.4f}"
+                )
+                stop_training = True
+
+        # In DDP, rank 0 broadcasts the stop decision to every process.
+        if ddp:
+            stop_tensor = torch.tensor(
+                1 if stop_training else 0,
+                dtype=torch.uint8,
+                device=device
+            )
+            dist.broadcast(stop_tensor, src=0)
+            stop_training = bool(stop_tensor.item())
+
+        if stop_training:
+            break
+
     if iter_num == 0 and eval_only:
         break
 
