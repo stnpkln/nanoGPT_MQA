@@ -1,8 +1,8 @@
 
 # WikiBook: full BookCorpus training
 
-out_dir = 'out-bookcorpus'
-eval_interval = 200
+out_dir = 'out-bookcorpus-mha'
+eval_interval = 500
 log_interval = 10
 eval_iters = 100
 eval_only = False
@@ -11,7 +11,7 @@ init_from = 'scratch'
 
 wandb_log = False
 wandb_project = 'nanogpt-mqa'
-wandb_run_name = 'bookcorpus'
+wandb_run_name = 'bookcorpus-mha'
 
 dataset = 'bookcorpus'
 
@@ -26,11 +26,11 @@ n_head = 12
 n_embd = 384
 dropout = 0.1
 bias = False
-mqa = True
+mqa = False
 
 # Optimizer
 learning_rate = 3e-4
-max_iters = 20000
+max_iters = 100000
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -39,7 +39,7 @@ grad_clip = 1.0
 # Learning-rate schedule
 decay_lr = True
 warmup_iters = 500
-lr_decay_iters = 20000
+lr_decay_iters = 100000
 min_lr = 3e-5
 
 # Hardware
