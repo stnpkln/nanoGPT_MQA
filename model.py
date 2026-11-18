@@ -52,7 +52,7 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                     .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, kv_cache=None, inference_mode:bool=False):
         if kv_cache is not None and not self.kv_cache:
             raise ValueError("KV-cache is disabled")
         B, T_x, C = x.size() # batch size, full (without kv_cache) / only new tokens (with kv_cache) length, embedding dimensionality (n_embd)
@@ -68,7 +68,7 @@ class CausalSelfAttention(nn.Module):
             v = torch.concat((kv_cache[1], v), dim=1)
             T_kv += past_len
 
-        new_kv_cache = (k, v) if self.kv_cache else None
+        new_kv_cache = (k, v) if self.kv_cache and inference_mode else None
 
         q = q.view(B, T_x,    self.n_head,    self.head_dim).transpose(1, 2) # (B, nh, T_x, hs)
         k = k.view(B, T_kv, self.n_kv_head, self.head_dim).transpose(1, 2)   # (B, nh, T_kv, hs)
@@ -113,9 +113,9 @@ class Block(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, kv_cache=None, inference_mode:bool=False):
         x_norm = self.ln_1(x)
-        attn_output, new_kv_cache = self.attn(x_norm, kv_cache)
+        attn_output, new_kv_cache = self.attn(x_norm, kv_cache, inference_mode)
         x = x + attn_output
         x = x + self.mlp(self.ln_2(x))
         return x, new_kv_cache
@@ -215,11 +215,12 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
         
         new_kv_cache = []
+        inefernce_mode = targets is None
         for i, block in enumerate(self.transformer.h):
             # block_cache: B, T_cached, n_kv_head * head_dim
             block_cache = kv_caches[i] if kv_caches is not None else None
 
-            x, updated_kv_cache = block(x, block_cache)
+            x, updated_kv_cache = block(x, block_cache, inefernce_mode)
 
             if updated_kv_cache is not None:
                 new_kv_cache.append(updated_kv_cache)
