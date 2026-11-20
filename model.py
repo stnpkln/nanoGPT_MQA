@@ -31,10 +31,6 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, (1 if config.mqa else 3) * config.n_embd, bias=config.bias)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
@@ -42,54 +38,55 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         self.mqa = config.mqa
-        # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        if not self.flash:
-            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
-            # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                        .view(1, 1, config.block_size, config.block_size))
+        self.kv_cache = config.kv_cache
+        self.n_kv_head = 1 if self.mqa else self.n_head
+        self.head_dim = self.n_embd // self.n_head
+        # attantion projection
+        self.q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.k = nn.Linear(config.n_embd, self.n_kv_head * self.head_dim, bias=config.bias)
+        self.v = nn.Linear(config.n_embd, self.n_kv_head * self.head_dim, bias=config.bias)
+        # output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+        # causal mask to ensure that attention is only applied to the left in the input sequence
+        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
+                                    .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x, kv_matrix=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+    def forward(self, x, kv_cache=None, inference_mode:bool=False):
+        if kv_cache is not None and not self.kv_cache:
+            raise ValueError("KV-cache is disabled")
+        B, T_x, C = x.size() # batch size, full (without kv_cache) / only new tokens (with kv_cache) length, embedding dimensionality (n_embd)
 
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v = None, None, None
-        head_dim = C // self.n_head
-        if self.mqa:
-            assert kv_matrix is not None
-            assert kv_matrix.shape == (B, T, 2 * head_dim)
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
 
-            q = self.c_attn(x)
-            k, v = kv_matrix.split(head_dim, dim=-1)
+        T_kv = T_x
+        past_len = kv_cache[0].size(1) if kv_cache is not None else 0
+        if kv_cache is not None:
+            k = torch.concat((kv_cache[0], k), dim=1)
+            v = torch.concat((kv_cache[1], v), dim=1)
+            T_kv += past_len
 
-            q = q.view(B, T, self.n_head, head_dim).transpose(1, 2)
-            k = k.view(B, T, 1, head_dim).transpose(1, 2)
-            v = v.view(B, T, 1, head_dim).transpose(1, 2)
+        new_kv_cache = (k, v) if self.kv_cache and inference_mode else None
 
-        else:
-            q, k, v = self.c_attn(x).split(C, dim=-1)
-
-            q = q.view(B, T, self.n_head, head_dim).transpose(1, 2)
-            k = k.view(B, T, self.n_head, head_dim).transpose(1, 2)
-            v = v.view(B, T, self.n_head, head_dim).transpose(1, 2)
-
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
-        else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        q = q.view(B, T_x,    self.n_head,    self.head_dim).transpose(1, 2) # (B, nh, T_x, hs)
+        k = k.view(B, T_kv, self.n_kv_head, self.head_dim).transpose(1, 2)   # (B, nh, T_kv, hs)
+        v = v.view(B, T_kv, self.n_kv_head, self.head_dim).transpose(1, 2)   # (B, nh, T_kv, hs)
+        
+        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh_kv, hs, T_kv) -> (B, nh, T, T_kv)
+        # manual implementation of attention
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,past_len:past_len+T_x,:T_kv] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        y = y.transpose(1, 2).contiguous().view(B, T_x, C) # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
-        return y
+
+        return y, new_kv_cache
 
 class MLP(nn.Module):
 
@@ -115,19 +112,13 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
-        if config.mqa:
-            head_dim = config.n_embd // config.n_head
-            self.kv_proj = nn.Linear(config.n_embd, 2 * head_dim, bias=config.bias)
-        else:
-            self.kv_proj = None
-        self.mqa = config.mqa
 
-    def forward(self, x):
+    def forward(self, x, kv_cache=None, inference_mode:bool=False):
         x_norm = self.ln_1(x)
-        kv_matrix = self.kv_proj(x_norm) if self.mqa else None
-        x = x + self.attn(x_norm, kv_matrix)
+        attn_output, new_kv_cache = self.attn(x_norm, kv_cache, inference_mode)
+        x = x + attn_output
         x = x + self.mlp(self.ln_2(x))
-        return x
+        return x, new_kv_cache
 
 @dataclass
 class GPTConfig:
@@ -139,6 +130,7 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mqa: bool = False
+    kv_cache: bool=False
 
 class GPT(nn.Module):
 
@@ -171,7 +163,8 @@ class GPT(nn.Module):
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
-        print(f"Attention type: {'MQA (Multi-Query Attention)' if config.mqa else 'MHA (Multi-Head Attention)'}")
+        print(f"Attention type: {"MQA (Multi-Query Attention)" if config.mqa else "MHA (Multi-Head Attention)"}")
+        print(f"KV cache is {"used" if config.kv_cache else "not used"}")
 
     def get_num_params(self, non_embedding=True):
         """
@@ -193,19 +186,50 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, kv_caches=None):
+        if targets is not None and kv_caches is not None:
+            raise ValueError("Sorry, but KV-cache cannot be used with targets =)")
+        # kv_cache is list of pairs k_cache and v_cache for each attantion block independatly
         device = idx.device
-        b, t = idx.size()
-        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
+        B, total_len = idx.shape
 
-        # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
+        assert total_len <= self.config.block_size
+
+        past_len = 0
+
+        if kv_caches is not None:
+            assert self.config.kv_cache
+            assert len(kv_caches) == self.config.n_layer
+
+            past_len = kv_caches[0][0].size(1)
+            assert past_len < total_len
+
+            idx = idx[:, past_len:]
+
+        T = idx.size(1)
+
+        pos = torch.arange(past_len, past_len + T, dtype=torch.long, device=device)
+
+        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, new_t, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (new_t, n_embd)
+
         x = self.transformer.drop(tok_emb + pos_emb)
-        for block in self.transformer.h:
-            x = block(x)
+        
+        new_kv_cache = []
+        inefernce_mode = targets is None
+        for i, block in enumerate(self.transformer.h):
+            # block_cache: B, T_cached, n_kv_head * head_dim
+            block_cache = kv_caches[i] if kv_caches is not None else None
+
+            x, updated_kv_cache = block(x, block_cache, inefernce_mode)
+
+            if updated_kv_cache is not None:
+                new_kv_cache.append(updated_kv_cache)
+
         x = self.transformer.ln_f(x)
+
+        if len(new_kv_cache) == 0:
+            new_kv_cache = None
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
@@ -216,7 +240,7 @@ class GPT(nn.Module):
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
             loss = None
 
-        return logits, loss
+        return logits, loss, new_kv_cache
 
     def crop_block_size(self, block_size):
         # model surgery to decrease the block size if necessary
@@ -231,6 +255,7 @@ class GPT(nn.Module):
 
     @classmethod
     def from_pretrained(cls, model_type, override_args=None):
+        raise Exception("Sorry, actual version dont support pretrained model =)")
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         override_args = override_args or {} # default to empty dict
         # only dropout can be overridden see more notes below
@@ -335,11 +360,16 @@ class GPT(nn.Module):
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+        kv_caches = None
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
+            if idx.size(1) > self.config.block_size:
+                idx_cond = idx[:, -self.config.block_size:]
+                kv_caches = None
+            else:
+                idx_cond = idx
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
+            logits, _, kv_caches = self(idx_cond, kv_caches = kv_caches if self.config.kv_cache else None)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options
