@@ -163,7 +163,8 @@ class GPT(nn.Module):
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
-        print(f"Attention type: {'MQA (Multi-Query Attention)' if config.mqa else 'MHA (Multi-Head Attention)'}")
+        print(f"Attention type: {"MQA (Multi-Query Attention)" if config.mqa else "MHA (Multi-Head Attention)"}")
+        print(f"KV cache is {"used" if config.kv_cache else "not used"}")
 
     def get_num_params(self, non_embedding=True):
         """
