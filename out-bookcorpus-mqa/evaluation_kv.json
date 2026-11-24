@@ -1,0 +1,21 @@
+{
+    "dataset": "bookcorpus",
+    "split": "test",
+    "attention": "MQA",
+    "kv_cache_enabled": true,
+    "parameters": 31512960,
+    "tokens_evaluated": 56857600,
+    "loss": 2.9627460175041462,
+    "perplexity": 19.351037149643016,
+    "inference": {
+        "prompt_length": 256,
+        "generated_tokens": 255,
+        "warmup_runs": 10,
+        "measured_runs": 1000,
+        "ms_per_token_average": 4.731066640393064,
+        "kv_cache_enabled": true,
+        "estimated_kv_cache_mib": 0.4990234375,
+        "gpu_peak_allocated_mib": 672.9697265625,
+        "gpu_peak_increment_over_baseline_mib": 68.4443359375
+    }
+}

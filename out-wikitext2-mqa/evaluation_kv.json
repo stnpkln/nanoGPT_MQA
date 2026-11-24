@@ -1,0 +1,21 @@
+{
+    "dataset": "wikitext2",
+    "split": "test",
+    "attention": "MQA",
+    "kv_cache_enabled": true,
+    "parameters": 25611648,
+    "tokens_evaluated": 284416,
+    "loss": 5.19315803040265,
+    "perplexity": 180.03621595507101,
+    "inference": {
+        "prompt_length": 128,
+        "generated_tokens": 127,
+        "warmup_runs": 10,
+        "measured_runs": 1000,
+        "ms_per_token_average": 2.646612649601994,
+        "kv_cache_enabled": true,
+        "estimated_kv_cache_mib": 0.37353515625,
+        "gpu_peak_allocated_mib": 628.08251953125,
+        "gpu_peak_increment_over_baseline_mib": 53.92138671875
+    }
+}
