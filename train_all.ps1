@@ -20,4 +20,4 @@ foreach ($config in $configs) {
     }
 }
 
-Write-Host "`nAll four training runs completed!" -ForegroundColor Green
+Write-Host "`nAll training runs completed!" -ForegroundColor Green

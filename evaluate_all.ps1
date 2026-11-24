@@ -2,10 +2,10 @@
 $ErrorActionPreference = "Stop"
 
 $configs = @(
-    @("--out_dir=out-wikitext2-mha", "--dataset=wikitext2", "--kv_cache", "--save_json", "--benchmark_inference", "--prompt_length=128"),
-    @("--out_dir=out-wikitext2-mqa", "--dataset=wikitext2", "--kv_cache", "--save_json", "--benchmark_inference", "--prompt_length=128"),
-    @("--out_dir=out-bookcorpus-mha", "--dataset=bookcorpus", "--kv_cache", "--save_json", "--benchmark_inference", "--prompt_length=384"),
-    @("--out_dir=out-bookcorpus-mqa", "--dataset=bookcorpus", "--kv_cache", "--save_json", "--benchmark_inference", "--prompt_length=384")
+    @("--out_dir=out-wikitext2-mha", "--dataset=wikitext2", "--kv_cache", "--save_json", "--prompt_length=128", "--gen_tokens=127"),
+    @("--out_dir=out-wikitext2-mqa", "--dataset=wikitext2", "--kv_cache", "--save_json", "--prompt_length=128", "--gen_tokens=127"),
+    @("--out_dir=out-bookcorpus-mha", "--dataset=bookcorpus", "--kv_cache", "--save_json", "--prompt_length=256", "--gen_tokens=255"),
+    @("--out_dir=out-bookcorpus-mqa", "--dataset=bookcorpus", "--kv_cache", "--save_json", "--prompt_length=256", "--gen_tokens=255")
 )
 
 foreach ($config in $configs) {

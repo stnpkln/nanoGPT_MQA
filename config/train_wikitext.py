@@ -14,14 +14,14 @@ wandb_run_name = 'wikitext2-mha'
 dataset = 'wikitext2'
 
 # Batch and sequence settings
-batch_size =32
+batch_size = 32
 block_size = 256
 gradient_accumulation_steps = 1
 
 # Model architecture
 n_layer = 4
 n_head = 4
-n_embd = 128
+n_embd = 384
 dropout = 0.2
 bias = False
 mqa = False
